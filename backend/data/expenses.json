@@ -1,0 +1,17 @@
+[
+  {
+    "amount": 18,
+    "category": "food",
+    "date": "5/23/2026"
+  },
+  {
+    "amount": 20,
+    "category": "travel",
+    "date": "5/23/2026"
+  },
+  {
+    "amount": 4,
+    "category": "coffee",
+    "date": "5/23/2026"
+  }
+]
