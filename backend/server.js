@@ -9,17 +9,52 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-const expensesPath = path.join(__dirname, "data", "expenses.json");
-const notesPath = path.join(__dirname, "data", "notes.json");
-const healthPath = path.join(__dirname, "data", "health.json");
-const tasksPath = path.join(__dirname, "data", "tasks.json");
-const financePath = path.join(__dirname, "data", "finance.json");
+const dataFolderPath = path.join(__dirname, "data");
 
-let expenses = JSON.parse(fs.readFileSync(expensesPath));
-let notes = JSON.parse(fs.readFileSync(notesPath));
-let healthLogs = JSON.parse(fs.readFileSync(healthPath));
-let tasks = JSON.parse(fs.readFileSync(tasksPath));
-let finance = JSON.parse(fs.readFileSync(financePath));
+if (!fs.existsSync(dataFolderPath)) {
+  fs.mkdirSync(dataFolderPath);
+}
+
+const expensesPath = path.join(dataFolderPath, "expenses.json");
+const notesPath = path.join(dataFolderPath, "notes.json");
+const healthPath = path.join(dataFolderPath, "health.json");
+const tasksPath = path.join(dataFolderPath, "tasks.json");
+const financePath = path.join(dataFolderPath, "finance.json");
+
+function loadJsonFile(filePath, defaultValue) {
+  try {
+    if (!fs.existsSync(filePath)) {
+      fs.writeFileSync(filePath, JSON.stringify(defaultValue, null, 2));
+      return defaultValue;
+    }
+
+    const fileContent = fs.readFileSync(filePath, "utf8");
+
+    if (!fileContent.trim()) {
+      fs.writeFileSync(filePath, JSON.stringify(defaultValue, null, 2));
+      return defaultValue;
+    }
+
+    return JSON.parse(fileContent);
+  } catch (error) {
+    console.error(`Error loading file: ${filePath}`, error.message);
+    fs.writeFileSync(filePath, JSON.stringify(defaultValue, null, 2));
+    return defaultValue;
+  }
+}
+
+function saveJsonFile(filePath, data) {
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+}
+
+let expenses = loadJsonFile(expensesPath, []);
+let notes = loadJsonFile(notesPath, []);
+let healthLogs = loadJsonFile(healthPath, []);
+let tasks = loadJsonFile(tasksPath, []);
+let finance = loadJsonFile(financePath, {
+  income: 0,
+  savingGoal: 0,
+});
 
 app.get("/", (req, res) => {
   res.send("Mini Jarvis backend is running");
@@ -44,15 +79,23 @@ app.get("/dashboard", (req, res) => {
     averageSleep: averageSleep.toFixed(1),
     pendingTasks,
     notesCount: notes.length,
-    income: finance.income,
-    savingGoal: finance.savingGoal,
+    income: finance.income || 0,
+    savingGoal: finance.savingGoal || 0,
   });
 });
 
 app.post("/chat", async (req, res) => {
   const { message } = req.body;
+
+  if (!message) {
+    return res.json({
+      reply: "Please type a message for Jarvis.",
+    });
+  }
+
   const lowerMessage = message.toLowerCase().trim();
 
+  // REMINDER
   if (lowerMessage.includes("remind me in")) {
     const secondsMatch = lowerMessage.match(/in (\d+) seconds?/);
     const minutesMatch = lowerMessage.match(/in (\d+) minutes?/);
@@ -81,6 +124,7 @@ app.post("/chat", async (req, res) => {
     });
   }
 
+  // HEALTH SUMMARY
   if (lowerMessage.includes("health summary")) {
     const sleepLogs = healthLogs.filter(log => log.type === "sleep");
 
@@ -96,6 +140,7 @@ app.post("/chat", async (req, res) => {
     });
   }
 
+  // EXPENSE SUMMARY
   if (
     lowerMessage === "summary" ||
     lowerMessage.includes("spending summary") ||
@@ -108,6 +153,7 @@ app.post("/chat", async (req, res) => {
     });
   }
 
+  // ADD EXPENSE
   if (lowerMessage.includes("spent")) {
     const amountMatch = lowerMessage.match(/\d+(\.\d+)?/);
     const amount = amountMatch ? Number(amountMatch[0]) : 0;
@@ -119,6 +165,8 @@ app.post("/chat", async (req, res) => {
     if (lowerMessage.includes("travel")) category = "travel";
     if (lowerMessage.includes("rent")) category = "rent";
     if (lowerMessage.includes("shopping")) category = "shopping";
+    if (lowerMessage.includes("bill")) category = "bill";
+    if (lowerMessage.includes("subscription")) category = "subscription";
 
     const expense = {
       amount,
@@ -127,7 +175,7 @@ app.post("/chat", async (req, res) => {
     };
 
     expenses.push(expense);
-    fs.writeFileSync(expensesPath, JSON.stringify(expenses, null, 2));
+    saveJsonFile(expensesPath, expenses);
 
     const totalSpent = expenses.reduce((sum, item) => sum + item.amount, 0);
 
@@ -136,8 +184,9 @@ app.post("/chat", async (req, res) => {
     });
   }
 
+  // ADD NOTE
   if (lowerMessage.startsWith("note ")) {
-    const noteText = message.substring(5);
+    const noteText = message.substring(5).trim();
 
     const note = {
       text: noteText,
@@ -145,11 +194,12 @@ app.post("/chat", async (req, res) => {
     };
 
     notes.push(note);
-    fs.writeFileSync(notesPath, JSON.stringify(notes, null, 2));
+    saveJsonFile(notesPath, notes);
 
     return res.json({ reply: "Note saved successfully." });
   }
 
+  // SHOW NOTES
   if (lowerMessage.includes("show notes")) {
     if (notes.length === 0) {
       return res.json({ reply: "No notes saved yet." });
@@ -162,6 +212,7 @@ app.post("/chat", async (req, res) => {
     return res.json({ reply: formattedNotes });
   }
 
+  // SLEEP TRACKING
   if (lowerMessage.includes("sleep")) {
     const hoursMatch = lowerMessage.match(/\d+(\.\d+)?/);
     const hours = hoursMatch ? Number(hoursMatch[0]) : 0;
@@ -174,7 +225,7 @@ app.post("/chat", async (req, res) => {
     };
 
     healthLogs.push(healthLog);
-    fs.writeFileSync(healthPath, JSON.stringify(healthLogs, null, 2));
+    saveJsonFile(healthPath, healthLogs);
 
     let advice = "";
 
@@ -185,7 +236,8 @@ app.post("/chat", async (req, res) => {
       advice =
         "You slept less than 7 hours. Try a short 20-minute nap if possible, avoid caffeine later, reduce screen time before bed, and aim to sleep 30–60 minutes earlier tonight.";
     } else if (hours <= 9) {
-      advice = "Good sleep amount. Try to keep the same sleep schedule consistently.";
+      advice =
+        "Good sleep amount. Try to keep the same sleep schedule consistently.";
     } else {
       advice =
         "You slept more than 9 hours. That can be okay sometimes, but if you often feel tired even after long sleep, monitor it and consider professional advice.";
@@ -196,6 +248,7 @@ app.post("/chat", async (req, res) => {
     });
   }
 
+  // ADD SCHEDULE
   if (lowerMessage.startsWith("schedule ")) {
     const taskText = message.substring(9).trim();
 
@@ -206,13 +259,14 @@ app.post("/chat", async (req, res) => {
     };
 
     tasks.push(task);
-    fs.writeFileSync(tasksPath, JSON.stringify(tasks, null, 2));
+    saveJsonFile(tasksPath, tasks);
 
     return res.json({
       reply: `Task scheduled: ${taskText}`,
     });
   }
 
+  // SHOW SCHEDULE
   if (lowerMessage.includes("show schedule")) {
     if (tasks.length === 0) {
       return res.json({ reply: "No scheduled tasks yet." });
@@ -228,35 +282,48 @@ app.post("/chat", async (req, res) => {
     return res.json({ reply: formattedTasks });
   }
 
+  // SET INCOME
   if (lowerMessage.startsWith("set income")) {
     const amountMatch = lowerMessage.match(/\d+(\.\d+)?/);
     const income = amountMatch ? Number(amountMatch[0]) : 0;
 
     finance.income = income;
-    fs.writeFileSync(financePath, JSON.stringify(finance, null, 2));
+    saveJsonFile(financePath, finance);
 
     return res.json({
       reply: `Income saved: £${income}.`,
     });
   }
 
+  // SET SAVING GOAL
   if (lowerMessage.startsWith("set saving goal")) {
     const amountMatch = lowerMessage.match(/\d+(\.\d+)?/);
     const savingGoal = amountMatch ? Number(amountMatch[0]) : 0;
 
     finance.savingGoal = savingGoal;
-    fs.writeFileSync(financePath, JSON.stringify(finance, null, 2));
+    saveJsonFile(financePath, finance);
 
     return res.json({
       reply: `Saving goal saved: £${savingGoal}.`,
     });
   }
 
+  // FINANCE ADVICE
   if (lowerMessage.includes("finance advice")) {
     const totalSpent = expenses.reduce((sum, item) => sum + item.amount, 0);
     const remainingAfterGoal = finance.income - finance.savingGoal;
     const remainingAfterSpending =
       finance.income - finance.savingGoal - totalSpent;
+
+    let advice = `Try to keep your spending below £${remainingAfterGoal} so you can still save £${finance.savingGoal}.`;
+
+    if (remainingAfterSpending < 0) {
+      advice =
+        "Warning: you have gone over your safe budget. Reduce non-essential spending and review food, coffee, shopping, and subscriptions.";
+    } else if (remainingAfterSpending < 100) {
+      advice =
+        "Careful: your remaining safe budget is low. Try to avoid unnecessary spending until your next income.";
+    }
 
     return res.json({
       reply:
@@ -266,7 +333,7 @@ app.post("/chat", async (req, res) => {
         `Tracked spending: £${totalSpent}\n` +
         `Safe spending budget after saving goal: £${remainingAfterGoal}\n` +
         `Remaining safe budget: £${remainingAfterSpending}\n\n` +
-        `Advice: Try to keep your spending below £${remainingAfterGoal} so you can still save £${finance.savingGoal}.`,
+        `Advice: ${advice}`,
     });
   }
 
@@ -277,5 +344,5 @@ app.post("/chat", async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Mini Jarvis backend running on http://localhost:${PORT}`);
+  console.log(`Mini Jarvis backend running on port ${PORT}`);
 });
